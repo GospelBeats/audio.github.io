@@ -16,7 +16,8 @@
   input[type="range"]{padding:14px 10px;}
   .value{margin-top:6px;font-size:13px;color:#374151;text-align:right;}
   .status{margin-top:14px;text-align:center;color:#6b7280;font-size:14px;min-height:18px;}
-  .btnRow{display:flex;gap:10px;margin-top:14px;}
+  /*.btnRow{display:flex;gap:10px;margin-top:14px;}*/
+  .btnRow{display:flex;flex-direction: column;gap:10px;margin-top:14px;}
   button{flex:1;border:0;border-radius:14px;padding:14px;font-size:18px;font-weight:700;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;}
   .start{background:var(--primary);color:#fff;}
   .pause{background:var(--gray);color:#fff;}
@@ -31,9 +32,9 @@
 
       <label>Target count</label>
       <select id="target">
-        <option value="25">25</option>
+        <option value="25" selected>25</option>
         <option value="50">50</option>
-        <option value="75" selected>75</option>
+        <option value="75">75</option>
         <option value="100">100</option>
       </select>
 
@@ -63,10 +64,10 @@
 (() => {
   // Put these MP3s in the SAME GitHub Pages folder as index.html
   const AUDIO = {
-    25: "counting_25.mp3",
-    50: "counting_50.mp3",
-    75: "counting_75.mp3",
-    100:"counting_100.mp3",
+    25: "c_25.mp3",
+    50: "c_50.mp3",
+    75: "c_75.mp3",
+    100:"c_100.mp3",
   };
 
   const elTarget   = document.getElementById("target");
