@@ -10,18 +10,17 @@
   body{margin:0;background:var(--bg);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;}
   .wrap{width:100%;max-width:440px;}
   .card{background:#fff;border-radius:18px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.10);}
-  h1{margin:0 0 14px;text-align:center;font-size:22px;}
-  label{display:block;margin:14px 0 6px;font-size:13px;color:#111827;}
+  h1{margin:0 0 14px;text-align:center;font-size:2em;}
+  label{display:block;margin:14px 0 6px;font-size:16px;color:#111827;}
   select,input[type="range"]{width:100%;border:0;border-radius:14px;background:#f1f5f9;padding:12px;font-size:16px;}
   input[type="range"]{padding:14px 10px;}
-  .value{margin-top:6px;font-size:13px;color:#374151;text-align:right;}
+  .value{margin-top:6px;font-size:14px;font-weight:bold;color:#374151;text-align:right;}
   .status{margin-top:14px;text-align:center;color:#6b7280;font-size:14px;min-height:18px;}
-  /*.btnRow{display:flex;gap:10px;margin-top:14px;}*/
   .btnRow{display:flex;flex-direction: column;gap:10px;margin-top:14px;}
-  button{flex:1;border:0;border-radius:14px;padding:14px;font-size:18px;font-weight:700;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;}
+  button{flex:1;border:0;border-radius:16px;padding:14px;font-size:18px;font-weight:700;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;}
   .start{background:var(--primary);color:#fff;}
-  .pause{background:var(--gray);color:#fff;}
-  .reset{background:var(--danger);color:#fff;}
+  .pause{background:var(--danger);color:#fff;}
+  .reset{background:var(--gray);color:#fff;}
   .hint{margin-top:12px;font-size:12px;color:#6b7280;line-height:1.35;}
 </style>
 </head>
@@ -30,7 +29,7 @@
     <div class="card">
       <h1>Workout Counter</h1>
 
-      <label>Target count</label>
+      <label>Target Count</label>
       <select id="target">
         <option value="25" selected>25</option>
         <option value="50">50</option>
@@ -38,11 +37,11 @@
         <option value="100">100</option>
       </select>
 
-      <label>Counting speed</label>
+      <label>Counting Speed</label>
       <input type="range" id="speed" min="0.6" max="1.6" step="0.05" value="1.0" />
       <div class="value" id="speedVal">1.00×</div>
 
-      <label>Counting audio volume</label>
+      <label>Counting Audio Volume</label>
       <input type="range" id="countVol" min="0" max="1" step="0.01" value="1" />
       <div class="value" id="countVolVal">1.00</div>
 
