@@ -160,15 +160,23 @@
     await ensureCtx();
     const t = Number(elTarget.value);
     if (loadedForTarget === t && buffer) return;
-
+  
     setStatus("Loading audio…");
-    const url = AUDIO[t];
-
-    const res = await fetch(url, { cache: "no-cache" });
-    if (!res.ok) throw new Error("Fetch failed: " + res.status);
-
+    const url = AUDIO[t] + "?v=" + Date.now(); // cache-bust for iOS Safari
+  
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`Fetch failed (${res.status}) for ${url}`);
+    }
+  
     const ab = await res.arrayBuffer();
-    buffer = await ctx.decodeAudioData(ab);
+  
+    try {
+      buffer = await ctx.decodeAudioData(ab);
+    } catch (e) {
+      throw new Error(`decodeAudioData failed for ${url} (file may not be valid MP3/AAC for iOS)`);
+    }
+  
     loadedForTarget = t;
     pausedAt = 0;
     setStatus("Ready");
@@ -232,7 +240,7 @@
 
     }catch(e){
       console.error(e);
-      setStatus("Couldn’t start. Check MP3 paths.");
+      setStatus(e.message || "Couldn't start. Check MP3 paths.");
     }
   }
 
