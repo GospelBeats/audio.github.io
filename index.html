@@ -38,13 +38,13 @@
       </select>
 
       <label>Counting Speed</label>
-      <input type="range" id="speed" min="0.6" max="1.6" step="0.05" value="1.0" />
+      <input type="range" id="speed" min="0.5" max="2.0" step="0.05" value="1.0" />
       <div class="value" id="speedVal">1.00×</div>
 
       <label>Counting Audio Volume</label>
       <input type="range" id="countVol" min="0" max="1" step="0.01" value="1" />
       <div class="value" id="countVolVal">1.00</div>
-      <audio id="countEl" playsinline preload="auto"></audio>
+      
       <div class="status" id="status">Ready</div>
 
       <div class="btnRow">
@@ -61,14 +61,6 @@
 
 <script>
 (() => {
-  // MP3s must be in the SAME GitHub Pages folder as index.html
-  const AUDIO = {
-    25: "c_25.mp3",
-    50: "c_50.mp3",
-    75: "c_75.mp3",
-    100:"c_100.mp3",
-  };
-
   const elTarget   = document.getElementById("target");
   const elSpeed    = document.getElementById("speed");
   const elSpeedVal = document.getElementById("speedVal");
@@ -79,200 +71,224 @@
   const pauseBtn   = document.getElementById("pauseBtn");
   const resetBtn   = document.getElementById("resetBtn");
 
-  // Your counting audio element (HTMLAudioElement)
-  const countEl = document.getElementById("countEl");
-
   const setStatus = (t) => (elStatus.textContent = t);
 
-  // WebAudio ONLY for beeps
+  // --- WebAudio for beeps (lightweight; best chance to keep Apple Music playing) ---
   let ctx = null;
+  let beepGain = null;
 
-  // wake lock (optional)
+  // Timer state
+  let timer = null;
+  let current = 0;
+  let target = Number(elTarget.value);
+  let paused = false;
+  let inCountdown = false;
+
+  // Optional wake lock
   let wakeLock = null;
 
-  function playbackRate() {
-    return Number(elSpeed.value);
-  }
-
-  function applyCountSettings() {
-    countEl.volume = Number(elCountVol.value);
-    countEl.playbackRate = playbackRate();
-  }
-
-  function ensureCtx() {
-    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  function ensureCtx(){
+    if (!ctx){
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      beepGain = ctx.createGain();
+      beepGain.connect(ctx.destination);
+    }
+    // keep gain in sync
+    beepGain.gain.value = Number(elCountVol.value);
     if (ctx.state === "suspended") return ctx.resume();
     return Promise.resolve();
   }
 
-  async function requestWakeLock() {
-    try {
-      if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
-    } catch (e) {}
+  async function requestWakeLock(){
+    try{
+      if ("wakeLock" in navigator){
+        wakeLock = await navigator.wakeLock.request("screen");
+      }
+    }catch(e){}
   }
-
-  async function releaseWakeLock() {
-    try { if (wakeLock) await wakeLock.release(); } catch (e) {}
+  async function releaseWakeLock(){
+    try{ if (wakeLock) await wakeLock.release(); }catch(e){}
     wakeLock = null;
   }
 
-  // ---- Beep countdown: 3 beeps + extra 1 second pause ----
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  function secondsPerCount(){
+    const speed = Number(elSpeed.value);
+    const baseTempo = 1.0; // 1 second per count at 1×
+    return baseTempo / speed;
+  }
 
-  async function beepOnce(durationMs = 140, freq = 880) {
-    await ensureCtx();
+  function vibrate(pattern){
+    // iOS Safari generally does NOT vibrate; Android usually does.
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  }
+
+  function beepOnce({durationMs=90, freq=880, volume=1} = {}){
+    // volume here scales the beep envelope; master volume comes from slider via beepGain.gain
     const t0 = ctx.currentTime;
-
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    const g = ctx.createGain();
 
     osc.type = "sine";
     osc.frequency.value = freq;
 
-    gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durationMs / 1000);
+    const peak = 0.22 * volume;
 
-    osc.connect(gain).connect(ctx.destination);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + durationMs/1000);
+
+    osc.connect(g).connect(beepGain);
     osc.start(t0);
-    osc.stop(t0 + durationMs / 1000);
+    osc.stop(t0 + durationMs/1000);
 
-    await new Promise((r) => (osc.onended = r));
+    return new Promise(r => osc.onended = r);
   }
 
-  async function countdown3BeepPlus1s() {
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // 3 beeps + 1 second pause (your requirement)
+  async function countdown3BeepPlus1s(){
+    inCountdown = true;
     setStatus("Get ready…");
-    for (let i = 0; i < 3; i++) {
-      await beepOnce(140, 880);
-      await wait(860); // ~1 second spacing
+    for (let i=0; i<3; i++){
+      await beepOnce({durationMs:120, freq:880, volume:1});
+      vibrate([30]);
+      await wait(880);
     }
     setStatus("…");
-    await wait(1000); // extra 1 sec pause
+    await wait(1000);
+    inCountdown = false;
   }
 
-  // ---- Counting audio loading (HTMLAudioElement) ----
-  let loadedTarget = null;
+  // Cue patterns:
+  // - "Go": single higher beep
+  // - "Halfway": double beep
+  // - "Done": triple beep (descending)
+  async function cueGo(){
+    await beepOnce({durationMs:120, freq:1040, volume:1});
+    vibrate([40]);
+  }
+  async function cueHalfway(){
+    await beepOnce({durationMs:90, freq:880, volume:1});
+    await wait(140);
+    await beepOnce({durationMs:90, freq:880, volume:1});
+    vibrate([30, 70, 30]);
+  }
+  async function cueDone(){
+    await beepOnce({durationMs:120, freq:880, volume:1});
+    await wait(120);
+    await beepOnce({durationMs:120, freq:740, volume:1});
+    await wait(120);
+    await beepOnce({durationMs:140, freq:660, volume:1});
+    vibrate([60, 80, 60]);
+  }
 
-  async function loadForSelectedTarget() {
-    const t = Number(elTarget.value);
-    if (loadedTarget === t && countEl.src) return;
+  function clearTimer(){
+    if (timer) clearTimeout(timer);
+    timer = null;
+  }
 
-    setStatus("Loading audio…");
+  async function tick(){
+    if (paused) return;
 
-    // Cache-bust is important for iPhone after renames/deploys
-    const url = AUDIO[t] + "?v=" + Date.now();
-    countEl.src = url;
-    countEl.load();
+    current += 1;
 
-    applyCountSettings();
+    // Main count beep (short “tick”)
+    // Slightly lower pitch so cues stand out
+    await beepOnce({durationMs:70, freq:760, volume:0.9});
+    vibrate([15]);
 
-    await new Promise((resolve, reject) => {
-      const onCanPlay = () => { cleanup(); resolve(); };
-      const onErr = () => {
-        cleanup();
-        reject(new Error("Audio failed to load: " + url));
-      };
+    // Milestones
+    const halfway = Math.ceil(target / 2);
+    if (current === halfway && target >= 4){
+      await cueHalfway();
+    }
 
-      function cleanup() {
-        countEl.removeEventListener("canplaythrough", onCanPlay);
-        countEl.removeEventListener("error", onErr);
+    if (current >= target){
+      setStatus("Done ✅");
+      await cueDone();
+      clearTimer();
+      await releaseWakeLock();
+      return;
+    }
+
+    // Schedule next
+    timer = setTimeout(tick, secondsPerCount() * 1000);
+  }
+
+  async function start(){
+    try{
+      await ensureCtx(); // must be within a user tap on iPhone
+      target = Number(elTarget.value);
+      if (!target || target < 1) {
+        setStatus("Choose a target count");
+        return;
       }
 
-      countEl.addEventListener("canplaythrough", onCanPlay);
-      countEl.addEventListener("error", onErr);
-    });
-
-    loadedTarget = t;
-    setStatus("Ready");
-  }
-
-  // ---- Controls ----
-  async function start() {
-    try {
-      // Ensure beep audio works on iOS (must happen within user gesture)
-      await ensureCtx();
-
-      // Load counting file (HTMLAudioElement)
-      await loadForSelectedTarget();
-
-      // Resume if paused mid-track
-      if (countEl.currentTime > 0 && countEl.paused && !countEl.ended) {
+      // Resume if paused mid-session
+      if (paused && current > 0){
+        paused = false;
         setStatus("Counting…");
         await requestWakeLock();
-        applyCountSettings();
-        await countEl.play();
+        timer = setTimeout(tick, 0);
         return;
       }
 
       // Fresh start
-      countEl.pause();
-      countEl.currentTime = 0;
-
+      reset(false); // keep UI, just reset internal state
       await countdown3BeepPlus1s();
+      await cueGo();
 
       setStatus("Counting…");
       await requestWakeLock();
-      applyCountSettings();
-      await countEl.play();
+      timer = setTimeout(tick, 0);
 
-    } catch (e) {
+    } catch (e){
       console.error(e);
-      setStatus(e.message || "Couldn't start.");
+      setStatus("Couldn’t start (audio not allowed yet). Tap Start again.");
     }
   }
 
-  function pause() {
-    if (!countEl.paused) countEl.pause();
+  function pause(){
+    if (inCountdown) return; // keep it simple; you can change if you want
+    paused = true;
+    clearTimer();
     releaseWakeLock();
     setStatus("Paused");
   }
 
-  function reset() {
-    countEl.pause();
-    countEl.currentTime = 0;
+  function reset(updateStatus=true){
+    paused = false;
+    inCountdown = false;
+    current = 0;
+    clearTimer();
     releaseWakeLock();
-    setStatus("Ready");
+    if (updateStatus) setStatus("Ready");
   }
 
-  // ---- UI bindings ----
+  // --- UI bindings ---
+  elTarget.addEventListener("change", () => {
+    reset();
+  });
+
   elSpeed.addEventListener("input", () => {
-    elSpeedVal.textContent = playbackRate().toFixed(2) + "×";
-    countEl.playbackRate = playbackRate();
+    elSpeedVal.textContent = Number(elSpeed.value).toFixed(2) + "×";
   });
 
   elCountVol.addEventListener("input", () => {
     const v = Number(elCountVol.value);
     elCountVolVal.textContent = v.toFixed(2);
-    countEl.volume = v;
-  });
-
-  elTarget.addEventListener("change", async () => {
-    reset();
-    loadedTarget = null;
-    try {
-      await loadForSelectedTarget();
-    } catch (e) {
-      console.error(e);
-      setStatus(e.message || "Couldn’t load audio.");
-    }
+    if (beepGain) beepGain.gain.value = v;
   });
 
   startBtn.addEventListener("click", start);
   pauseBtn.addEventListener("click", pause);
-  resetBtn.addEventListener("click", reset);
+  resetBtn.addEventListener("click", () => reset(true));
 
-  countEl.addEventListener("ended", () => {
-    releaseWakeLock();
-    setStatus("Done ✅");
-  });
-
-  // ---- init ----
-  elSpeedVal.textContent = playbackRate().toFixed(2) + "×";
+  // Init labels
+  elSpeedVal.textContent = Number(elSpeed.value).toFixed(2) + "×";
   elCountVolVal.textContent = Number(elCountVol.value).toFixed(2);
-  applyCountSettings();
-
-  // Optional preload (safe)
-  loadForSelectedTarget().catch(() => setStatus("Ready (loads on Start)"));
+  setStatus("Ready");
 })();
 </script>
 </body>
