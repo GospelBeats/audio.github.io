@@ -44,7 +44,7 @@
       <label>Counting Audio Volume</label>
       <input type="range" id="countVol" min="0" max="1" step="0.01" value="1" />
       <div class="value" id="countVolVal">1.00</div>
-
+      <audio id="countEl" playsinline preload="auto"></audio>
       <div class="status" id="status">Ready</div>
 
       <div class="btnRow">
@@ -61,7 +61,7 @@
 
 <script>
 (() => {
-  // Put these MP3s in the SAME GitHub Pages folder as index.html
+  // MP3s must be in the SAME GitHub Pages folder as index.html
   const AUDIO = {
     25: "c_25.mp3",
     50: "c_50.mp3",
@@ -79,214 +79,200 @@
   const pauseBtn   = document.getElementById("pauseBtn");
   const resetBtn   = document.getElementById("resetBtn");
 
-  const setStatus = (t) => elStatus.textContent = t;
+  // Your counting audio element (HTMLAudioElement)
+  const countEl = document.getElementById("countEl");
 
-  // WebAudio (best shot at mixing with background music on mobile)
+  const setStatus = (t) => (elStatus.textContent = t);
+
+  // WebAudio ONLY for beeps
   let ctx = null;
-  let gain = null;
-
-  let buffer = null;
-  let source = null;
-  let startedAt = 0; // ctx time when play started
-  let pausedAt = 0;  // offset into buffer (seconds)
-  let loadedForTarget = null;
 
   // wake lock (optional)
   let wakeLock = null;
 
-  function ensureCtx(){
-    if (!ctx){
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
-      gain = ctx.createGain();
-      gain.gain.value = Number(elCountVol.value);
-      gain.connect(ctx.destination);
-    }
+  function playbackRate() {
+    return Number(elSpeed.value);
+  }
+
+  function applyCountSettings() {
+    countEl.volume = Number(elCountVol.value);
+    countEl.playbackRate = playbackRate();
+  }
+
+  function ensureCtx() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (ctx.state === "suspended") return ctx.resume();
     return Promise.resolve();
   }
 
-  async function requestWakeLock(){
-    try{
-      if ("wakeLock" in navigator){
-        wakeLock = await navigator.wakeLock.request("screen");
-      }
-    }catch(e){}
+  async function requestWakeLock() {
+    try {
+      if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+    } catch (e) {}
   }
-  async function releaseWakeLock(){
-    try{ if (wakeLock) await wakeLock.release(); }catch(e){}
+
+  async function releaseWakeLock() {
+    try { if (wakeLock) await wakeLock.release(); } catch (e) {}
     wakeLock = null;
   }
 
-  function stopSource(){
-    if (source){
-      try { source.stop(0); } catch(e) {}
-      try { source.disconnect(); } catch(e) {}
-      source = null;
-    }
-  }
+  // ---- Beep countdown: 3 beeps + extra 1 second pause ----
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  function playbackRate(){
-    return Number(elSpeed.value);
-  }
-
-  function currentOffset(){
-    if (!ctx || !buffer) return 0;
-    // wallclock delta * rate gives buffer seconds elapsed
-    const t = (ctx.currentTime - startedAt) * playbackRate();
-    return Math.max(0, Math.min(t, buffer.duration));
-  }
-
-  function playFrom(offsetSec){
-    stopSource();
-    source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.playbackRate.value = playbackRate();
-    source.connect(gain);
-
-    startedAt = ctx.currentTime - offsetSec;
-    source.start(0, offsetSec);
-
-    source.onended = () => {
-      if (source){ // natural end
-        source = null;
-        pausedAt = 0;
-        releaseWakeLock();
-        setStatus("Done ✅");
-      }
-    };
-  }
-
-  async function loadBufferForSelectedTarget(){
-    await ensureCtx();
-    const t = Number(elTarget.value);
-    if (loadedForTarget === t && buffer) return;
-  
-    setStatus("Loading audio…");
-    const url = AUDIO[t] + "?v=" + Date.now(); // cache-bust for iOS Safari
-  
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) {
-      throw new Error(`Fetch failed (${res.status}) for ${url}`);
-    }
-  
-    const ab = await res.arrayBuffer();
-  
-    try {
-      buffer = await ctx.decodeAudioData(ab);
-    } catch (e) {
-      throw new Error(`decodeAudioData failed for ${url} (file may not be valid MP3/AAC for iOS)`);
-    }
-  
-    loadedForTarget = t;
-    pausedAt = 0;
-    setStatus("Ready");
-  }
-
-  // Beep countdown: 3 beeps (1s apart) + extra 1 second pause
-  const wait = (ms) => new Promise(r => setTimeout(r, ms));
-
-  async function beepOnce(durationMs=140, freq=880){
+  async function beepOnce(durationMs = 140, freq = 880) {
     await ensureCtx();
     const t0 = ctx.currentTime;
+
     const osc = ctx.createOscillator();
-    const g = ctx.createGain();
+    const gain = ctx.createGain();
 
     osc.type = "sine";
     osc.frequency.value = freq;
 
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + durationMs/1000);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durationMs / 1000);
 
-    osc.connect(g).connect(ctx.destination);
+    osc.connect(gain).connect(ctx.destination);
     osc.start(t0);
-    osc.stop(t0 + durationMs/1000);
+    osc.stop(t0 + durationMs / 1000);
 
-    await new Promise(r => osc.onended = r);
+    await new Promise((r) => (osc.onended = r));
   }
 
-  async function countdown3BeepPlus1s(){
+  async function countdown3BeepPlus1s() {
     setStatus("Get ready…");
-    for (let i=0;i<3;i++){
+    for (let i = 0; i < 3; i++) {
       await beepOnce(140, 880);
-      await wait(860); // total ~1s spacing
+      await wait(860); // ~1 second spacing
     }
     setStatus("…");
-    await wait(1000); // extra 1 second pause after beeps
+    await wait(1000); // extra 1 sec pause
   }
 
-  async function start(){
-    try{
-      await ensureCtx();
-      await loadBufferForSelectedTarget();
+  // ---- Counting audio loading (HTMLAudioElement) ----
+  let loadedTarget = null;
 
-      // Resume if paused
-      if (pausedAt > 0){
+  async function loadForSelectedTarget() {
+    const t = Number(elTarget.value);
+    if (loadedTarget === t && countEl.src) return;
+
+    setStatus("Loading audio…");
+
+    // Cache-bust is important for iPhone after renames/deploys
+    const url = AUDIO[t] + "?v=" + Date.now();
+    countEl.src = url;
+    countEl.load();
+
+    applyCountSettings();
+
+    await new Promise((resolve, reject) => {
+      const onCanPlay = () => { cleanup(); resolve(); };
+      const onErr = () => {
+        cleanup();
+        reject(new Error("Audio failed to load: " + url));
+      };
+
+      function cleanup() {
+        countEl.removeEventListener("canplaythrough", onCanPlay);
+        countEl.removeEventListener("error", onErr);
+      }
+
+      countEl.addEventListener("canplaythrough", onCanPlay);
+      countEl.addEventListener("error", onErr);
+    });
+
+    loadedTarget = t;
+    setStatus("Ready");
+  }
+
+  // ---- Controls ----
+  async function start() {
+    try {
+      // Ensure beep audio works on iOS (must happen within user gesture)
+      await ensureCtx();
+
+      // Load counting file (HTMLAudioElement)
+      await loadForSelectedTarget();
+
+      // Resume if paused mid-track
+      if (countEl.currentTime > 0 && countEl.paused && !countEl.ended) {
         setStatus("Counting…");
         await requestWakeLock();
-        playFrom(pausedAt);
+        applyCountSettings();
+        await countEl.play();
         return;
       }
 
       // Fresh start
-      stopSource();
-      pausedAt = 0;
+      countEl.pause();
+      countEl.currentTime = 0;
 
       await countdown3BeepPlus1s();
 
       setStatus("Counting…");
       await requestWakeLock();
-      playFrom(0);
+      applyCountSettings();
+      await countEl.play();
 
-    }catch(e){
+    } catch (e) {
       console.error(e);
-      setStatus(e.message || "Couldn't start. Check MP3 paths.");
+      setStatus(e.message || "Couldn't start.");
     }
   }
 
-  function pause(){
-    if (!ctx || !buffer || !source) return;
-    pausedAt = currentOffset();
-    stopSource();
+  function pause() {
+    if (!countEl.paused) countEl.pause();
     releaseWakeLock();
     setStatus("Paused");
   }
 
-  function reset(){
-    stopSource();
-    pausedAt = 0;
+  function reset() {
+    countEl.pause();
+    countEl.currentTime = 0;
     releaseWakeLock();
     setStatus("Ready");
   }
 
-  // UI bindings
+  // ---- UI bindings ----
   elSpeed.addEventListener("input", () => {
     elSpeedVal.textContent = playbackRate().toFixed(2) + "×";
-    if (source) source.playbackRate.value = playbackRate();
+    countEl.playbackRate = playbackRate();
   });
 
   elCountVol.addEventListener("input", () => {
     const v = Number(elCountVol.value);
     elCountVolVal.textContent = v.toFixed(2);
-    if (gain) gain.gain.value = v;
+    countEl.volume = v;
   });
 
   elTarget.addEventListener("change", async () => {
     reset();
-    try { await loadBufferForSelectedTarget(); }
-    catch(e){ console.error(e); setStatus("Couldn’t load audio."); }
+    loadedTarget = null;
+    try {
+      await loadForSelectedTarget();
+    } catch (e) {
+      console.error(e);
+      setStatus(e.message || "Couldn’t load audio.");
+    }
   });
 
   startBtn.addEventListener("click", start);
   pauseBtn.addEventListener("click", pause);
   resetBtn.addEventListener("click", reset);
 
-  // init text
+  countEl.addEventListener("ended", () => {
+    releaseWakeLock();
+    setStatus("Done ✅");
+  });
+
+  // ---- init ----
   elSpeedVal.textContent = playbackRate().toFixed(2) + "×";
   elCountVolVal.textContent = Number(elCountVol.value).toFixed(2);
+  applyCountSettings();
 
-  // optional preload
-  loadBufferForSelectedTarget().catch(() => setStatus("Ready (loads on Start)"));
+  // Optional preload (safe)
+  loadForSelectedTarget().catch(() => setStatus("Ready (loads on Start)"));
 })();
 </script>
 </body>
